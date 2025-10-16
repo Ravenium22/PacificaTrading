@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Copy Trading Admin Dashboard</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: #0f0f0f;
+      color: #e0e0e0;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      font-size: 28px;
+      margin-bottom: 10px;
+      color: #fff;
+    }
+
+    .subtitle {
+      color: #888;
+      margin-bottom: 30px;
+    }
+
+    .section {
+      background: #1a1a1a;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 30px;
+      border: 1px solid #333;
+    }
+
+    h2 {
+      font-size: 20px;
+      margin-bottom: 15px;
+      color: #fff;
+      border-bottom: 2px solid #333;
+      padding-bottom: 10px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    th, td {
+      text-align: left;
+      padding: 12px;
+      border-bottom: 1px solid #333;
+    }
+
+    th {
+      background: #252525;
+      color: #aaa;
+      font-weight: 600;
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    tr:hover {
+      background: #252525;
+    }
+
+    .wallet {
+      font-family: 'Courier New', monospace;
+      color: #4a9eff;
+    }
+
+    .timestamp {
+      color: #888;
+      font-size: 14px;
+    }
+
+    .actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    button {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      transition: all 0.2s;
+    }
+
+    .btn-approve {
+      background: #22c55e;
+      color: white;
+    }
+
+    .btn-approve:hover {
+      background: #16a34a;
+    }
+
+    .btn-deny {
+      background: #ef4444;
+      color: white;
+    }
+
+    .btn-deny:hover {
+      background: #dc2626;
+    }
+
+    .btn-refresh {
+      background: #3b82f6;
+      color: white;
+      margin-bottom: 15px;
+    }
+
+    .btn-refresh:hover {
+      background: #2563eb;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 40px;
+      color: #666;
+    }
+
+    .loading {
+      text-align: center;
+      padding: 20px;
+      color: #888;
+    }
+
+    .error {
+      background: #ef4444;
+      color: white;
+      padding: 12px;
+      border-radius: 4px;
+      margin-bottom: 15px;
+    }
+
+    .success {
+      background: #22c55e;
+      color: white;
+      padding: 12px;
+      border-radius: 4px;
+      margin-bottom: 15px;
+    }
+
+    .notes {
+      color: #888;
+      font-style: italic;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Copy Trading Admin Dashboard</h1>
+    <p class="subtitle">Manage copy trading approval requests</p>
+
+    <div id="message"></div>
+
+    <!-- Pending Requests Section -->
+    <div class="section">
+      <h2>Pending Approval Requests</h2>
+      <button class="btn-refresh" onclick="loadPending()">Refresh Pending</button>
+      <div id="pending-content"></div>
+    </div>
+
+    <!-- Approved Wallets Section -->
+    <div class="section">
+      <h2>Approved Wallets</h2>
+      <button class="btn-refresh" onclick="loadApproved()">Refresh Approved</button>
+      <div id="approved-content"></div>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = window.location.origin;
+
+    // Format timestamp
+    function formatDate(dateString) {
+      if (!dateString) return 'N/A';
+      const date = new Date(dateString);
+      return date.toLocaleString();
+    }
+
+    // Show message
+    function showMessage(message, type = 'success') {
+      const messageDiv = document.getElementById('message');
+      messageDiv.innerHTML = `<div class="${type}">${message}</div>`;
+      setTimeout(() => {
+        messageDiv.innerHTML = '';
+      }, 5000);
+    }
+
+    // Load pending requests
+    async function loadPending() {
+      const content = document.getElementById('pending-content');
+      content.innerHTML = '<div class="loading">Loading...</div>';
+
+      try {
+        const response = await fetch(`${API_BASE}/admin/pending`);
+        if (!response.ok) throw new Error('Failed to load pending requests');
+
+        const pending = await response.json();
+
+        if (pending.length === 0) {
+          content.innerHTML = '<div class="empty-state">No pending requests</div>';
+          return;
+        }
+
+        let html = '<table><thead><tr>';
+        html += '<th>Wallet</th>';
+        html += '<th>Requested At</th>';
+        html += '<th>Notes</th>';
+        html += '<th>Actions</th>';
+        html += '</tr></thead><tbody>';
+
+        pending.forEach(item => {
+          html += '<tr>';
+          html += `<td class="wallet">${item.wallet.first_4}...${item.wallet.last_4}</td>`;
+          html += `<td class="timestamp">${formatDate(item.requested_at)}</td>`;
+          html += `<td class="notes">${item.notes || '-'}</td>`;
+          html += `<td class="actions">
+            <button class="btn-approve" onclick="approveWallet('${item.wallet.full}')">Approve</button>
+            <button class="btn-deny" onclick="denyWallet('${item.wallet.full}')">Deny</button>
+          </td>`;
+          html += '</tr>';
+        });
+
+        html += '</tbody></table>';
+        content.innerHTML = html;
+      } catch (error) {
+        content.innerHTML = `<div class="error">Error: ${error.message}</div>`;
+      }
+    }
+
+    // Load approved wallets
+    async function loadApproved() {
+      const content = document.getElementById('approved-content');
+      content.innerHTML = '<div class="loading">Loading...</div>';
+
+      try {
+        const response = await fetch(`${API_BASE}/admin/approved`);
+        if (!response.ok) throw new Error('Failed to load approved wallets');
+
+        const approved = await response.json();
+
+        if (approved.length === 0) {
+          content.innerHTML = '<div class="empty-state">No approved wallets</div>';
+          return;
+        }
+
+        let html = '<table><thead><tr>';
+        html += '<th>Wallet</th>';
+        html += '<th>Requested At</th>';
+        html += '<th>Approved At</th>';
+        html += '<th>Notes</th>';
+        html += '</tr></thead><tbody>';
+
+        approved.forEach(item => {
+          html += '<tr>';
+          html += `<td class="wallet">${item.wallet.first_4}...${item.wallet.last_4}</td>`;
+          html += `<td class="timestamp">${formatDate(item.requested_at)}</td>`;
+          html += `<td class="timestamp">${formatDate(item.approved_at)}</td>`;
+          html += `<td class="notes">${item.notes || '-'}</td>`;
+          html += '</tr>';
+        });
+
+        html += '</tbody></table>';
+        content.innerHTML = html;
+      } catch (error) {
+        content.innerHTML = `<div class="error">Error: ${error.message}</div>`;
+      }
+    }
+
+    // Approve wallet
+    async function approveWallet(wallet) {
+      if (!confirm(`Approve wallet ${wallet.substring(0, 4)}...${wallet.substring(wallet.length - 4)}?`)) {
+        return;
+      }
+
+      const notes = prompt('Optional notes:');
+
+      try {
+        const response = await fetch(`${API_BASE}/admin/approve/${wallet}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ notes })
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || 'Failed to approve wallet');
+        }
+
+        const result = await response.json();
+        showMessage(`Wallet approved: ${result.wallet.first_4}...${result.wallet.last_4}`, 'success');
+
+        // Reload both lists
+        loadPending();
+        loadApproved();
+      } catch (error) {
+        showMessage(`Error: ${error.message}`, 'error');
+      }
+    }
+
+    // Deny wallet
+    async function denyWallet(wallet) {
+      if (!confirm(`Deny and remove wallet ${wallet.substring(0, 4)}...${wallet.substring(wallet.length - 4)}? This action cannot be undone.`)) {
+        return;
+      }
+
+      try {
+        const response = await fetch(`${API_BASE}/admin/deny/${wallet}`, {
+          method: 'POST'
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || 'Failed to deny wallet');
+        }
+
+        const result = await response.json();
+        showMessage(`Wallet denied: ${result.wallet.first_4}...${result.wallet.last_4}`, 'success');
+
+        // Reload pending list
+        loadPending();
+      } catch (error) {
+        showMessage(`Error: ${error.message}`, 'error');
+      }
+    }
+
+    // Initial load
+    loadPending();
+    loadApproved();
+
+    // Auto-refresh every 30 seconds
+    setInterval(() => {
+      loadPending();
+      loadApproved();
+    }, 30000);
+  </script>
+</body>
+</html>
