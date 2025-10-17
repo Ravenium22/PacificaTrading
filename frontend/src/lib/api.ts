@@ -1,4 +1,9 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
+const RAW_API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
+// Ensure absolute URL (prefix https:// if user provides host only) and remove trailing slash
+const API_URL = (RAW_API.startsWith('http://') || RAW_API.startsWith('https://')
+  ? RAW_API
+  : `https://${RAW_API}`
+).replace(/\/$/, '');
 
 export interface ApprovalStatus {
   approved: boolean;
