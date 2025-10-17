@@ -1,4 +1,5 @@
 import express, { Request, Response, NextFunction } from 'express';
+import fs from 'fs';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
@@ -8,7 +9,7 @@ import { PacificaRestClient } from './api/rest-client';
 import Trader from './database/models/Trader';
 import CopyRelationship from './database/models/CopyRelationship';
 import { encryptApiKey, decryptApiKey } from './utils/encryption';
-import { isValidSolanaPrivateKey } from './utils/validation';
+import { isValidSolanaPrivateKey, verifySolanaSignature, isRecentTimestamp } from './utils/validation';
 import strategyRoutes from './api/strategies';
 import { strategyExecutor } from './strategies/executor';
 
@@ -25,6 +26,39 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json());
+
+// Simple Basic Auth for admin endpoints
+const ADMIN_USER = process.env.ADMIN_USER;
+const ADMIN_PASS = process.env.ADMIN_PASS;
+
+function requireAdminAuth(req: Request, res: Response, next: NextFunction) {
+  if (!ADMIN_USER || !ADMIN_PASS) {
+    // If not configured, block access in production to avoid exposing admin
+    if (process.env.NODE_ENV === 'production') {
+      return res.status(503).send('Admin authentication not configured');
+    }
+    return next(); // allow in dev when not configured
+  }
+
+  const auth = req.headers['authorization'];
+  if (!auth || !auth.startsWith('Basic ')) {
+    res.setHeader('WWW-Authenticate', 'Basic realm="Admin"');
+    return res.status(401).send('Authentication required');
+  }
+
+  const encoded = auth.substring('Basic '.length);
+  const decoded = Buffer.from(encoded, 'base64').toString('utf8');
+  const sep = decoded.indexOf(':');
+  const user = decoded.substring(0, sep);
+  const pass = decoded.substring(sep + 1);
+
+  if (user === ADMIN_USER && pass === ADMIN_PASS) {
+    return next();
+  }
+
+  res.setHeader('WWW-Authenticate', 'Basic realm="Admin"');
+  return res.status(401).send('Invalid credentials');
+}
 
 // Error handling middleware
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
@@ -100,10 +134,30 @@ app.patch('/api/traders/:id/approve', async (req: Request, res: Response) => {
 // Copy trading request endpoints
 app.post('/api/copy/request', async (req: Request, res: Response) => {
   try {
-    const { wallet_address } = req.body;
+    const { wallet_address, signature, timestamp } = req.body;
 
     if (!wallet_address) {
       return res.status(400).json({ error: 'wallet_address is required' });
+    }
+
+    // Require signature + fresh timestamp to verify wallet ownership and prevent replay
+    if (!signature || !timestamp) {
+      return res.status(400).json({ error: 'signature and timestamp are required' });
+    }
+
+    if (!isRecentTimestamp(Number(timestamp))) {
+      return res.status(400).json({ error: 'timestamp is too old or invalid' });
+    }
+
+    const message = JSON.stringify({
+      type: 'copy_approval_request',
+      wallet_address,
+      timestamp: Number(timestamp)
+    });
+
+    const ok = verifySolanaSignature(message, String(signature), String(wallet_address));
+    if (!ok) {
+      return res.status(401).json({ error: 'invalid signature' });
     }
 
     // Check if already exists
@@ -569,12 +623,25 @@ app.get('/api/positions/:wallet', async (req: Request, res: Response) => {
 });
 
 // Admin dashboard route
-app.get('/admin', (req: Request, res: Response) => {
-  res.sendFile(path.join(__dirname, 'admin', 'dashboard.html'));
+app.get('/admin', requireAdminAuth, (req: Request, res: Response) => {
+  // Try dist/admin first (production), then fallback to src/admin (dev)
+  const distPath = path.join(__dirname, 'admin', 'dashboard.html');
+  const srcPath = path.join(process.cwd(), 'src', 'admin', 'dashboard.html');
+
+  const fileToServe = fs.existsSync(distPath)
+    ? distPath
+    : (fs.existsSync(srcPath) ? srcPath : null);
+
+  if (!fileToServe) {
+    console.error('[Admin] dashboard.html not found in dist/admin or src/admin');
+    return res.status(404).send('Admin dashboard not found');
+  }
+
+  res.sendFile(fileToServe);
 });
 
 // Admin endpoints
-app.get('/admin/pending', async (req: Request, res: Response) => {
+app.get('/admin/pending', requireAdminAuth, async (req: Request, res: Response) => {
   try {
     const pending = await Trader.findAll({
       where: { is_approved: false },
@@ -595,7 +662,7 @@ app.get('/admin/pending', async (req: Request, res: Response) => {
   }
 });
 
-app.get('/admin/approved', async (req: Request, res: Response) => {
+app.get('/admin/approved', requireAdminAuth, async (req: Request, res: Response) => {
   try {
     const approved = await Trader.findAll({
       where: { is_approved: true },
@@ -617,7 +684,7 @@ app.get('/admin/approved', async (req: Request, res: Response) => {
   }
 });
 
-app.post('/admin/approve/:wallet', async (req: Request, res: Response) => {
+app.post('/admin/approve/:wallet', requireAdminAuth, async (req: Request, res: Response) => {
   try {
     const { wallet } = req.params;
     const { notes } = req.body;
@@ -652,7 +719,7 @@ app.post('/admin/approve/:wallet', async (req: Request, res: Response) => {
   }
 });
 
-app.post('/admin/deny/:wallet', async (req: Request, res: Response) => {
+app.post('/admin/deny/:wallet', requireAdminAuth, async (req: Request, res: Response) => {
   try {
     const { wallet } = req.params;
 
