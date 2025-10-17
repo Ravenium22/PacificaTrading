@@ -2,7 +2,7 @@
 
 import { ReactNode, useEffect, useState } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
-import { checkApproval, requestApproval } from '@/lib/api';
+import { checkApproval, requestApprovalSigned } from '@/lib/api';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -12,7 +12,7 @@ interface ApprovalCheckProps {
 }
 
 export function ApprovalCheck({ children }: ApprovalCheckProps) {
-  const { publicKey } = useWallet();
+  const { publicKey, signMessage } = useWallet();
   const [approved, setApproved] = useState(false);
   const [loading, setLoading] = useState(true);
   const [showDialog, setShowDialog] = useState(false);
@@ -45,12 +45,28 @@ export function ApprovalCheck({ children }: ApprovalCheckProps) {
 
   const handleRequestAccess = async () => {
     if (!publicKey) return;
+    if (!signMessage) {
+      setError('Your wallet does not support message signing. Please use a wallet like Phantom or Solflare.');
+      return;
+    }
 
     setRequesting(true);
     setError(null);
 
     try {
-      await requestApproval(publicKey.toBase58());
+      const timestamp = Date.now();
+      const messageObj = {
+        type: 'copy_approval_request',
+        wallet_address: publicKey.toBase58(),
+        timestamp,
+      };
+      const message = new TextEncoder().encode(JSON.stringify(messageObj));
+      const signature = await signMessage(message);
+      // signature is Uint8Array; convert to base58 without adding new deps (use bs58 via dynamic import)
+      const { default: bs58 } = await import('bs58');
+      const signatureB58 = bs58.encode(signature);
+
+      await requestApprovalSigned(publicKey.toBase58(), signatureB58, timestamp);
       setSuccess(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to request access');

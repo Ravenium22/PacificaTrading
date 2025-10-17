@@ -145,6 +145,31 @@ export async function requestApproval(walletAddress: string): Promise<{ success:
   return { success: true, message: data.message || 'Approval request submitted' };
 }
 
+// Signed approval request (recommended/required in production)
+export async function requestApprovalSigned(walletAddress: string, signatureB58: string, timestamp: number): Promise<{ success: boolean; message: string }> {
+  const response = await fetch(`${API_URL}/api/copy/request`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      wallet_address: walletAddress,
+      signature: signatureB58,
+      timestamp,
+    }),
+  });
+  if (!response.ok) {
+    try {
+      const error = await response.json();
+      throw new Error(error.error || error.message || 'Failed to request approval');
+    } catch {
+      throw new Error('Failed to request approval');
+    }
+  }
+  const data = await response.json();
+  return { success: true, message: data.message || 'Approval request submitted' };
+}
+
 // Create a new copy trading relationship
 export async function createRelationship(data: {
   followerWallet: string;
